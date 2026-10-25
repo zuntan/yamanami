@@ -1,0 +1,19 @@
+[package]
+name = "yamanami-hello"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["zuntan"]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasi = "0.14"
+
+[features]
+v2 = []
+
+[profile.release]
+opt-level = "s"
+strip = "debuginfo"

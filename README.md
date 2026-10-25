@@ -1,229 +1,204 @@
 # Yamanami — WebAssembly Application Server
 
-WasmアプリケーションをHTTPで配備し、指定したHTTPパスから実行する実験プロジェクトです。TomcatのWARデプロイやPHPのファイル配置に近い手軽さを、言語に依存しない実行境界で実現することを目指します。
+WasmアプリケーションをHTTPで配備し、指定したパスから実行する、小さな実験用アプリケーションサーバーです。
 
-**現在は開発準備・設計検討段階です。サーバー、CLI、サンプル、テストは未実装です。本書の構成は提案であり、確認を受けてから実装を開始します。**
+**初段の実験実装です。** 実行ファイルは `yamanami` 一本で、サーバーと管理CLIを提供します。配備対象は標準WASI HTTPハンドラを公開する **WASI 0.2コンポーネント形式のWasm 1本**です。
 
-## 基本方針
+## 初段でできること
 
-- サーバーの役割をHTTP受付、Wasm実行、OS資源へのアクセス、配備管理に絞る。
-- ルーティング詳細、Cookie、セッション、静的ファイル配信は原則としてアプリ側で実装する。
-- アプリごとに異なる言語・ライブラリ・バージョンを使用できる構成を目指す。
-- OS資源は標準WASIを優先し、大規模な独自POSIX互換層は作らない。
-- Tokioによる非同期I/Oと、複数CPUコアでのWasmインスタンス並列実行を優先する。
-- 外部DBを必須にせず、小さく実装して実用性と性能を測定する。
+- CLI・HTTP管理APIによる配備、一覧、詳細取得、再配備による更新
+- パス接頭辞の最長一致によるアプリ割り当て
+- メソッド・URI・ヘッダー・本文の受け渡しと、Wasmによるレスポンス生成
+- SQLiteへのWasm BLOB、アプリ、変更不可のRelease、配備履歴の保存
+- SHA-256によるWasmの重複排除、コンパイル済みコードのメモリキャッシュ
+- リクエストごとに新しいStore・インスタンスを作るメモリ分離と並列実行
+- 再起動後の復元、無効な更新時の旧版維持
+- ゲストメモリ、fuel、実行期限、同時実行数、HTTP本文、アップロードの制限
 
-サーバーの独自コード量と、Wasmtimeを含むバイナリサイズ・メモリ使用量は別々に評価します。
+初段は一般HTTP・管理HTTPの両方をloopback限定とします。管理APIにはBearerトークンが必要です。外向きHTTP・ソケット・ホストのファイル・環境変数はゲストへ許可しません。標準WASIの時刻・乱数は利用できます。
 
-## 技術構成案
+## 開発環境の準備
 
-| 要素 | 初期案 |
-| --- | --- |
-| 実装言語 | Rust stable |
-| 非同期ランタイム | Tokio 1系、マルチスレッド構成 |
-| HTTP | Hyper 1系、初期はHTTP/1.1 |
-| Wasmランタイム | Wasmtime 48系LTSの最新パッチを候補とする |
-| ゲストインターフェース | Component Model、WASI 0.2、WASI HTTP |
-| 永続化 | SQLite、rusqlite |
-| バイナリ識別 | 受信したWasmバイト列のSHA-256 |
-| クライアント | Rust製CLI、HTTP管理APIを利用 |
-
-依存の正確な版と必要なRustバージョンは、実装開始時に互換性とセキュリティ修正を確認して選び、Cargo.lockで固定します。
-
-## WASI・HTTPインターフェースの調査
-
-調査基準日：2026年10月25日。公式資料に基づく調査結果で、ローカルでのビルド・動作検証は未実施です。
-
-### WasmtimeとWASI
-
-調査時に確認できたWasmtimeの最新安定版は50.0.0、48系のパッチ版は48.0.7です。Wasmtimeは12の倍数のメジャー版を24か月保守するLTSとしているため、初期版では48系を候補にします。
-
-- [Wasmtimeリリース一覧](https://github.com/bytecodealliance/wasmtime/releases)
-- [Wasmtimeの保守方針](https://docs.wasmtime.dev/stability-release.html)
-
-WASI 0.3は現行の安定仕様で、ネイティブなasync、future、streamを導入しています。一方、言語ツールチェーンの対応は0.2のほうが広いため、初期版はWASI 0.2を採用する案です。
-
-- [WASIリリース情報](https://wasi.dev/releases)
-- [WASI 0.3](https://wasi.dev/releases/wasi-p3)
-
-### 標準HTTPと独自ABIの比較
-
-| 方式 | 利点 | 負担 |
-| --- | --- | --- |
-| WASI HTTP | 標準の型・ストリーム・言語向けツールを利用できる | Component ModelとWITに対応するビルド環境が必要 |
-| 独自HTTP ABI | 単純なバッファ受け渡しで開始できる | 各言語のSDK、メモリ所有権、ストリーム、互換性維持を自前で管理する必要がある |
-
-言語間の移植性を優先し、wasi:http/incoming-handlerを公開するコンポーネントを受け付けます。独自HTTP ABIは設けません。
-
-配備対象はWasmコンポーネント形式の.wasmです。任意のcore Wasmモジュールが、そのままHTTPハンドラになるわけではありません。必要なexport・importとWITバージョンを配備時に検証します。
-
-wasi:http/proxy worldだけでは永続ファイルアクセスを満たせないため、必要な標準WASI filesystemインポートも提供する方針です。対応する標準インターフェースの組み合わせとWITバージョンを明記し、サンプルとホストで固定します。
-
-- [Wasmtime WASI HTTP API](https://docs.wasmtime.dev/api/wasmtime_wasi_http/p2/index.html)
-
-### asyncと並列実行
-
-ホスト側の非同期実行と、ゲスト言語のasyncは区別します。
-
-- Wasmtimeの非同期APIを使い、ゲストのI/O待ちでホストスレッドを占有しない構成にする。
-- WASI 0.2はストリーム・pollableを使う方式。ゲスト言語の既存asyncランタイムが無変更で動くことまでは保証しない。
-- WASI 0.3のネイティブasync対応は初期版の対象外とする。
-- CPUを使い続けるゲストには、fuelによる実行の定期的な譲渡とepoch interruptionを設定する。
-- Wasm内部のマルチスレッドは初期版の対象外とする。
-
-- [Wasmtimeのasync対応](https://docs.wasmtime.dev/api/wasmtime/)
-- [WASI 0.2のホスト実装](https://docs.wasmtime.dev/api/wasmtime_wasi/p2/index.html)
-- [Storeの実行制御API](https://docs.wasmtime.dev/api/wasmtime/struct.Store.html)
-
-通常のWasmtime APIサイトには開発版が掲載される場合があります。実装では採用したリリース版のAPIを参照します。
-
-### 言語間の互換性
-
-Rustはstableのwasm32-wasip2を利用できます。C/C++、Go、JavaScript/TypeScript、Pythonにもコンポーネントを作る手段がありますが、専用ツールやバインディング生成が必要で、対応状況には差があります。
-
-互換性の基準は「同じWITインターフェースを実装したコンポーネントを実行できること」です。既存の各言語のWebフレームワークがそのまま利用できることは前提にしません。初期サンプルはRustで作成し、他言語の対応を実証する場合は言語別の動作確認を行います。
-
-- [WASIの言語別対応状況](https://wasi.dev/languages)
-- [Component Modelの言語別ガイド](https://component-model.bytecodealliance.org/language-support.html)
-
-## アプリケーションとRelease
-
-| 概念 | 意味 |
-| --- | --- |
-| Application | 名前と永続データ領域を持つ論理的なアプリケーション |
-| Release | 特定時点のモジュール構成と設定。作成後は変更不可 |
-| Module | SHA-256で識別するWasmバイナリ。初期の実行対象はコンポーネント |
-
-ReleaseとModuleの間に対応テーブルを設け、データモデルを1アプリ＝1 Wasmに固定しません。初期版の実行機能は1 Releaseあたり1個の実行コンポーネントに制限します。
-
-| テーブル案 | 保存内容 |
-| --- | --- |
-| applications | アプリID、名前、現在有効なRelease参照 |
-| releases | 所属アプリ、作成日時、不変の設定 |
-| release_modules | ReleaseとModuleの対応、名前・役割 |
-| modules | SHA-256、Wasm BLOB、サイズ |
-| routes | 公開パスとアプリの対応 |
-| deployment_events | 配備・更新履歴 |
-
-SHA-256はサーバー側で計算し、同一ハッシュのバイナリは重複保存しません。
-
-## 配備と更新
-
-1. 認証、アップロードサイズ、アプリ名・パスを検証する。
-2. Wasmの形式、インターフェース、制限との適合性を検証し、コンパイルする。
-3. SQLiteのトランザクション内でModule、Release、公開パス、配備履歴を保存し、有効Release参照を切り替える。
-4. 成功後、新規リクエストから新しいReleaseを使用する。
-
-配備失敗時は現在のReleaseを維持します。処理中のリクエストは開始時に選択したReleaseで完了させます。初期版は単一サーバープロセスを前提とし、切替とリクエスト受付の整合性をテストします。複数モジュール実行とロールバック操作は将来の対象です。
-
-## HTTP実行とキャッシュ
-
-- 公開パスは接頭辞の最長一致で選び、パス境界を考慮する。/helloは/helloworldに一致させない。
-- ゲストには元のURI、メソッド、ヘッダー、本文を渡す。
-- リクエストごとに独立したStore、インスタンス、WASIコンテキストを作る。
-- コンパイル済みComponentは共有し、ゲストの実行メモリは共有しない。
-- メモリキャッシュには容量上限を設け、同じハッシュへの同時コンパイルをまとめる。
-- キャッシュは単一Engineの存続中に限定し、その設定とCPU条件を互換性の境界とする。
-- 再起動後はSQLite内の元のWasmから再コンパイルする。ディスク上のコンパイル済みコードは初期版では扱わない。
-- コンパイルとSQLiteの同期処理はTokioの通常のI/Oワーカーから外す。
-
-## 資源制限
-
-初期版から以下を設定可能にする方針です。具体的な既定値は実装時に決定します。
-
-- ゲストメモリ、テーブル等の上限
-- HTTP本文・ヘッダー・ホスト側バッファの上限
-- fuelによる計算量制限と実行の定期的な譲渡
-- epoch interruptionと全体期限による実行時間制限
-- サーバー全体・アプリ単位の同時実行数と待ち行列の上限
-- Wasmアップロードサイズとコンパイル並列数の上限
-
-fuelはCPU使用率の上限ではありません。初期版では計算量・時間・同時実行数を制御し、厳密なCPU割合の制御は対象外とします。レスポンス送信とゲストタスクを含むリクエスト全体を期限・キャンセル管理の対象にします。
-
-## WASIと永続ファイル
-
-各アプリに専用の永続ディレクトリを割り当て、ゲストには/dataとして公開します。例えばshopアプリの/dataはshop専用のディレクトリを指します。
-
-ディレクトリは変更されないアプリIDにひも付け、Release更新後も保持します。ホストのディレクトリや環境変数は暗黙に継承しません。時刻、乱数、ファイルアクセスは標準WASIを使用します。
-
-WASIのTCP/UDPソケットと外向きHTTPは利用可能ですが、初期版では明示的に拒否します。将来許可する場合も、ソケットと外向きHTTPは別々の権限として扱います。
-
-- [WASIコンテキストと権限設定](https://docs.wasmtime.dev/api/wasmtime_wasi/struct.WasiCtxBuilder.html)
-
-## 管理APIとHTTPS
-
-- 一般HTTP受付と管理APIを別ポートに分離する。
-- 初期管理APIはloopbackアドレスに限定し、Bearerトークンを必須とする。
-- 管理APIの外部アドレスへのbindは初期版では許可しない。
-- 初期検証はローカルHTTPで行う。
-- 将来の外部公開ではTLSと適切な認証・認可を必須とする。一般HTTPのHTTPS化はリバースプロキシでのTLS終端も候補とする。
-
-未認証の外部クライアントが任意のWasmを配備・実行できる構成にはしません。
-
-## CLIの利用イメージ
-
-以下は予定する操作例で、現時点では実行できません。コマンド名と引数は仮です。
+Linux環境での開発を想定しています。Rustup、Cコンパイラ・リンカ、Python 3が必要です。SQLiteは同梱ソースからビルドするため、SQLiteサーバーや開発用パッケージは不要です。
 
 ~~~bash
-wasmctl deploy hello.wasm --app hello --path /hello
-wasmctl list
-wasmctl info hello
+# rust-toolchain.tomlに指定したRust、rustfmt、Clippy、WASIターゲットを準備
+rustup show
 
-# 同じアプリへの再配備で新しいReleaseへ更新
-wasmctl deploy hello-v2.wasm --app hello --path /hello
+# サーバーとCLIをビルド
+cargo build --locked
+
+# サンプルをビルド
+cargo build --locked --manifest-path examples/hello/Cargo.toml \
+  --target wasm32-wasip2 --release
 ~~~
 
-CLIはHTTP管理APIを使います。将来のブラウザや別のWasmアプリからの管理でも同じAPIを利用できる構成を目指します。実装後に起動・ビルド・認証設定を含む実際の手順を追記します。
+Rust 1.95.0とwasm32-wasip2ターゲットを指定しています。Wasmtime、wasmtime-wasi、wasmtime-wasi-httpは48.0.7に固定し、その他の依存もCargo.lockに記録しています。サンプルには独立したCargo.lockがあります。
 
-## 初期実装の完了条件
+## 起動・配備・実行
 
-1. Rust製HTTPサーバーを起動できる。
-2. 小さなRust製Wasm HTTPアプリをビルドできる。
-3. CLIから配備してHTTPパスに割り当てられる。
-4. curlまたはブラウザからリクエストできる。
-5. Wasmが生成したステータス・ヘッダー・本文を受信できる。
-6. 複数リクエストを並行処理できる。
-7. 再起動後も配備済みアプリを利用できる。
-8. 新しいWasmへ更新でき、失敗時には旧版を維持できる。
-9. リクエスト間・アプリ間で実行メモリが分離される。
+端末Aでサーバーを起動します。トークンは例示文字列をそのまま使わず、16文字以上のランダムな値を設定してください。
 
-## テストと性能評価の計画
+~~~bash
+export YAMANAMI_TOKEN="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+cargo run --locked -- serve
+~~~
 
-動作確認用サンプルと自動テストを用意します。
+既定のアドレスと保存先は次のとおりです。
 
-- 配備、一覧、情報取得、パス割り当て、更新
-- メソッド・URI・ヘッダー・本文とレスポンスの受け渡し
-- 再起動復元、更新失敗、Wasm BLOBの重複排除
-- 並行実行とゲストメモリの分離
-- アプリ別ファイル権限と更新後の永続データ維持
-- 無限ループ、メモリ超過、期限超過、過負荷時の制限
-- 管理APIの認証拒否、公開ポートからの管理操作拒否
+| 用途 | 既定値 |
+| --- | --- |
+| アプリHTTP | http://127.0.0.1:8080 |
+| 管理API | http://127.0.0.1:9090 |
+| SQLite | var/yamanami.sqlite3 |
 
-性能評価では、初回コンパイル時間、キャッシュ後の応答時間、並列数ごとのスループット・p95・RSS、実行バイナリサイズを記録します。CPU、OS、ランタイム設定、ゲスト、本文サイズを併記します。性能値はまだありません。
+端末Bには端末Aと同じトークンを設定します。
 
-## 初期実装に含めないもの
+~~~bash
+export YAMANAMI_TOKEN='端末Aと同じトークン'
 
-- Wasm内部のマルチスレッド、WASI 0.3の実行対応
-- アプリ内の複数Wasmモジュール実行、ロールバック操作
-- アプリ間メッセージング、HTTPを使う並列ワーカー
-- コードと状態データをまとめるリモート実行
-- SHA-256によるノード間転送の省略
-- ブラウザWasmからのリモート実行、複数サーバーでの分散処理
+target/debug/yamanami ctl deploy \
+  examples/hello/target/wasm32-wasip2/release/yamanami_hello.wasm \
+  --app hello --path /hello
 
-拡張を妨げないデータモデルを用意しつつ、そのための複雑な抽象化は先行実装しません。
+target/debug/yamanami ctl list
+target/debug/yamanami ctl info hello
 
-## 進め方
+curl -i -X POST 'http://127.0.0.1:8080/hello/echo?q=1' \
+  -H 'x-demo: sample' --data 'request body'
+~~~
 
-1. 調査結果と初期実装の範囲・設計判断を確認する（現在）。
-2. 確認後、開発環境と採用バージョンを確定する。
-3. サーバー、CLI、Wasmサンプル、自動テストを実装する。
-4. 配備・実行・更新・再起動・分離を検証し、性能を測定する。
-5. 実測結果から次の拡張を判断する。
+サンプルはバージョン、メソッド、パスとクエリ、x-demoヘッダー、本文、インスタンス内の呼出回数を返します。リクエストごとにインスタンスを作るため、呼出回数は毎回1になります。
+
+~~~text
+Hello from Yamanami v1
+method=Method::Post
+path=/hello/echo?q=1
+x-demo=sample
+calls=1
+body=request body
+~~~
+
+Ctrl+Cで停止し、同じデータベースで再起動すると、配備済みアプリを復元します。
+
+## 更新
+
+v2をビルドし、同じアプリ名へ再配備します。
+
+~~~bash
+cargo build --locked --manifest-path examples/hello/Cargo.toml \
+  --target wasm32-wasip2 --release --features v2
+
+target/debug/yamanami ctl deploy \
+  examples/hello/target/wasm32-wasip2/release/yamanami_hello.wasm \
+  --app hello --path /hello
+
+curl http://127.0.0.1:8080/hello
+~~~
+
+新しいリクエストからv2を使い、すでに実行中のリクエストは選択済みのReleaseで処理を続けます。コンパイルやリンク検証に失敗した更新では、現在のReleaseを維持します。実行時に初めて起こるトラップや制限超過まで配備時に検出するものではありません。
+
+## 設定と制限
+
+~~~bash
+target/debug/yamanami serve --help
+target/debug/yamanami ctl --help
+
+# ポートと実行制限を指定する例
+target/debug/yamanami serve \
+  --listen 127.0.0.1:8081 \
+  --admin-listen 127.0.0.1:9091 \
+  --database var/experiment.sqlite3 \
+  --memory-mib 64 --fuel 10000000 --timeout-ms 3000 \
+  --concurrency 16 --app-concurrency 4 --body-limit 1048576
+
+target/debug/yamanami ctl --endpoint http://127.0.0.1:9091 list
+~~~
+
+| 項目 | 既定値・動作 |
+| --- | --- |
+| ゲスト線形メモリ | 64 MiB、1メモリ。ホスト全体のRSS上限ではない |
+| fuel | 1リクエストあたり10,000,000 |
+| ゲスト実行期限 | 3秒。インスタンス生成・本文生成完了・ハンドラ終了を含む |
+| 全体 / アプリ同時実行数 | 16 / 4。空きがなければ503、待ち行列なし |
+| リクエスト / レスポンス本文 | 各1 MiB。初段はサイズ制限付きバッファ方式 |
+| Wasmアップロード | 16 MiB |
+| 同時配備 | 1件。競合は503 |
+| アプリ数 | 最大32 |
+| コンパイルキャッシュ | 最近使用した8件と、現在有効・処理中のReleaseが保持するコード |
+| HTTP接続数 | 一般128、管理8。超過接続は閉じる |
+| HTTP接続期限 | 一般65秒、管理120秒。keep-aliveなし |
+| 本文受信期限 | 一般10秒、配備30秒 |
+
+fuelは計算量の制限で、CPU使用率の指定ではありません。一定fuelごとの実行譲渡とepoch interruptionにより、CPUループがTokioを占有し続けることを防ぎます。実行失敗・ゲスト制限超過は502、一般本文の超過は413を返します。
+
+配備はコンパイルとリンク検証を終えてからSQLiteトランザクションで保存し、有効Releaseとルートを切り替えます。保存・公開の途中でクライアントが離れても処理を完了するため、配備要求がタイムアウトした場合はinfoで結果を確認してください。コンパイル処理自体には強制終了の期限を設けていません。
+
+データベースは1サーバープロセスで使用し、ロックファイルで通常の二重起動を防ぎます。運用時は同じDBを別名・別経路から開かないでください。初段には削除・履歴の掃除機能がなく、過去ReleaseとWasmは保存し続けます。
+
+## 管理API
+
+アプリHTTPと管理HTTPは別のポートです。管理操作は一般HTTPポートでは処理しません。
+
+| メソッド | パス | 内容 |
+| --- | --- | --- |
+| GET | /v1/apps | 有効なアプリ一覧 |
+| GET | /v1/apps/{app} | アプリ名、割当パス、Release ID、SHA-256 |
+| PUT | /v1/apps/{app} | Wasm本体を配備。x-yamanami-pathで割当パスを指定 |
+
+すべての管理操作にAuthorization: Bearerトークンが必要です。
+
+~~~bash
+curl -H "Authorization: Bearer $YAMANAMI_TOKEN" \
+  -H 'Content-Type: application/wasm' \
+  -H 'x-yamanami-path: /hello' \
+  --upload-file examples/hello/target/wasm32-wasip2/release/yamanami_hello.wasm \
+  http://127.0.0.1:9090/v1/apps/hello
+~~~
+
+アプリ名は1〜64文字の英数字・ハイフン・アンダースコアです。割当パスはASCIIの絶対パスとし、空セグメント、ドットセグメント、末尾スラッシュ（ルート以外）は認めません。/helloは/helloと/hello/以下に一致し、/helloworldには一致しません。ゲストには元のURIを渡します。
+
+## テスト
+
+~~~bash
+cargo fmt --all -- --check
+cargo fmt --manifest-path examples/hello/Cargo.toml -- --check
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked
+
+# 実バイナリ・CLI・SQLite・Wasmを使ったE2Eテスト
+python3 tests/e2e.py
+~~~
+
+E2Eテストはホストとサンプルのv1/v2をビルドし、一時ディレクトリと空きポートを使用します。配備・リクエストの受け渡し・更新・更新失敗・再起動・重複排除・並行処理・実行メモリ分離・管理認証・外向きHTTP拒否・各種制限を確認します。
+
+サンプルの/sleep、/hold、/spin、/memory、/large、/networkは制限確認用のエンドポイントです。通常のアプリに組み込む機能ではありません。
+
+確認した結果と簡易性能測定は[初段の動作確認](docs/first-stage-verification.md)を参照してください。
+
+GitHub Actions用の[CIテンプレート](docs/github-actions-ci.yml)も用意しています。現在のpush用トークンにはworkflow権限がないため、まだ有効化していません。対応する権限で.github/workflows/ci.ymlに配置すると有効になります。性能の本格評価は次の段階とし、リリースビルドで初回コンパイル、応答時間、スループット、p95、RSSを条件付きで測定します。
+
+## 設計と今後
+
+初段のデータモデルはApplication、Release、Moduleを分離します。ModuleはSHA-256で識別し、ReleaseとModuleは対応テーブルで結びます。初段の実行対象はmainの1個ですが、1アプリ＝1 Wasmをデータ構造に固定しません。
+
+HTTP境界には独自ABIを設けず、標準WASI HTTPを使用します。言語間の互換性は「同じWITインターフェースのコンポーネントを実行できること」で、既存Webフレームワークが無変更で動作することを意味しません。現時点で動作確認するゲストはRustのみです。
+
+後続の候補は次のとおりです。
+
+- アプリ専用/dataの永続ディレクトリとファイル権限
+- 外向き通信の明示的な許可設定
+- 別言語のサンプルとWASI 0.3のasync対応
+- 複数モジュール構成、静的ファイルを含む配備、ロールバック
+- HTTPS、外部公開、運用向けの制限・監視
+- Wasm内部のマルチスレッド、アプリ間通信、分散実行
+
+当初の調査・構想は[開発準備メモ](docs/initial-design.md)に保存しています。現在の実装範囲と操作方法はこのREADMEを参照してください。
 
 ## ライセンス
 
-Yamanami — MIT License。ライセンス全文は[LICENSE](LICENSE)を参照してください。
+Yamanami — MIT License。全文は[LICENSE](LICENSE)を参照してください。
 
-YamanamiのMITライセンスは、Yamanami上で動くWasmアプリケーションに自動的に適用されません。利用者は、商用・非公開を含む独自ライセンスのWasmアプリケーションを配備できます。Yamanami上で実行することだけを理由に、アプリケーションのソースコード公開やMITライセンスへの変更を求めることはありません。
+YamanamiのMITライセンスは、Yamanami上で動くWasmアプリケーションには自動的に適用されません。利用者は商用・非公開を含む独自ライセンスのWasmアプリを配備できます。Yamanami上で実行することだけを理由に、ソースコード公開やMITへの変更を求めることはありません。
 
-Wasmアプリケーションとその依存ライブラリには、それぞれのライセンス条件が適用されます。Yamanamiが利用する第三者の依存ライブラリも、それぞれのライセンスに従います。
+アプリと依存ライブラリにはそれぞれのライセンス条件が適用されます。Yamanamiが利用する第三者ライブラリも、それぞれのライセンスに従います。
