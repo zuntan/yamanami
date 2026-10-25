@@ -25,7 +25,7 @@ use tokio::{
     task::JoinSet,
 };
 
-pub const MAX_UPLOAD: usize = 16 * 1024 * 1024;
+pub const MAX_UPLOAD: usize = 128 * 1024 * 1024;
 const MAX_APPS: usize = 32;
 
 #[derive(Args, Clone)]
@@ -40,6 +40,16 @@ pub struct Options {
     token: String,
     #[arg(long, default_value_t = 64)]
     memory_mib: usize,
+    #[arg(long, default_value = "speed", value_parser = ["none", "speed"])]
+    compiler_opt_level: String,
+    #[arg(long, default_value_t = 1)]
+    max_memories: usize,
+    #[arg(long, default_value_t = 32)]
+    max_instances: usize,
+    #[arg(long, default_value_t = 8)]
+    max_tables: usize,
+    #[arg(long, default_value_t = 16 * 1024 * 1024)]
+    upload_limit: usize,
     #[arg(long, default_value_t = 10_000_000)]
     fuel: u64,
     #[arg(long, default_value_t = 3000)]
@@ -68,6 +78,7 @@ struct State {
     requests: Semaphore,
     token_hash: [u8; 32],
     app_concurrency: usize,
+    upload_limit: usize,
 }
 type Reply = Response<Full<Bytes>>;
 type Failure = (StatusCode, String);
@@ -167,12 +178,36 @@ pub async fn serve(options: Options) -> Result<()> {
         (1..=16 * 1024 * 1024).contains(&options.body_limit),
         "body-limit must be 1..16777216"
     );
-    let runtime = Runtime::new(
+    ensure!(
+        (1..=32).contains(&options.max_memories),
+        "max-memories must be 1..32"
+    );
+    ensure!(
+        (1..=512).contains(&options.max_instances),
+        "max-instances must be 1..512"
+    );
+    ensure!(
+        (1..=128).contains(&options.max_tables),
+        "max-tables must be 1..128"
+    );
+    ensure!(
+        (1..=MAX_UPLOAD).contains(&options.upload_limit),
+        "upload-limit must be 1..134217728"
+    );
+    let mut runtime = Runtime::new(
         options.memory_mib * 1024 * 1024,
         options.fuel,
         Duration::from_millis(options.timeout_ms),
         options.body_limit,
+        if options.compiler_opt_level == "none" {
+            wasmtime::OptLevel::None
+        } else {
+            wasmtime::OptLevel::Speed
+        },
     )?;
+    runtime.max_memories = options.max_memories;
+    runtime.max_instances = options.max_instances;
+    runtime.max_tables = options.max_tables;
     let db_path = options.database.clone();
     let (db, _database_lock) = tokio::task::spawn_blocking(move || -> Result<_> {
         if let Some(parent) = db_path.parent().filter(|p| !p.as_os_str().is_empty()) {
@@ -200,6 +235,7 @@ pub async fn serve(options: Options) -> Result<()> {
         requests: Semaphore::new(options.concurrency),
         token_hash: Sha256::digest(options.token.as_bytes()).into(),
         app_concurrency: options.app_concurrency,
+        upload_limit: options.upload_limit,
     });
     let active = state.db.active().await?;
     ensure!(
@@ -424,7 +460,7 @@ impl State {
         }
         let wasm = tokio::time::timeout(
             Duration::from_secs(30),
-            Limited::new(req.into_body(), MAX_UPLOAD).collect(),
+            Limited::new(req.into_body(), self.upload_limit).collect(),
         )
         .await
         .map_err(|_| fail(StatusCode::REQUEST_TIMEOUT, "upload deadline exceeded"))?

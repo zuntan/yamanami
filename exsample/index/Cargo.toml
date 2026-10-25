@@ -1,0 +1,13 @@
+[package]
+name = "calculator-index"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["zuntan"]
+
+[lib]
+crate-type = ["cdylib"]
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+yamanami-demo-http = { path = "../http-support" }
+wasi = "0.14"

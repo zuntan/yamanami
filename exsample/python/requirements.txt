@@ -1,0 +1,2 @@
+componentize-py==0.25.0
+chevron==0.14.0

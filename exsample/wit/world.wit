@@ -1,0 +1,4 @@
+package yamanami:calculator;
+world calculator {
+  include wasi:http/proxy@0.2.12;
+}

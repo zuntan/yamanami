@@ -1,0 +1,7 @@
+[workspace]
+members = ["rust", "index", "http-support"]
+resolver = "3"
+
+[profile.release]
+opt-level = "s"
+strip = "debuginfo"

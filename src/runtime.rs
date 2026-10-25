@@ -63,11 +63,21 @@ pub struct Runtime {
     pub fuel: u64,
     pub timeout: Duration,
     pub body_limit: usize,
+    pub max_memories: usize,
+    pub max_instances: usize,
+    pub max_tables: usize,
 }
 impl Runtime {
-    pub fn new(memory: usize, fuel: u64, timeout: Duration, body_limit: usize) -> Result<Self> {
+    pub fn new(
+        memory: usize,
+        fuel: u64,
+        timeout: Duration,
+        body_limit: usize,
+        opt_level: wasmtime::OptLevel,
+    ) -> Result<Self> {
         let mut config = Config::new();
         config
+            .cranelift_opt_level(opt_level)
             .wasm_component_model(true)
             .consume_fuel(true)
             .epoch_interruption(true);
@@ -78,6 +88,9 @@ impl Runtime {
             fuel,
             timeout,
             body_limit,
+            max_memories: 1,
+            max_instances: 32,
+            max_tables: 8,
         })
     }
 
@@ -117,9 +130,9 @@ impl Runtime {
                 limits: StoreLimitsBuilder::new()
                     .memory_size(self.memory)
                     .table_elements(10000)
-                    .instances(32)
-                    .memories(1)
-                    .tables(8)
+                    .instances(self.max_instances)
+                    .memories(self.max_memories)
+                    .tables(self.max_tables)
                     .trap_on_grow_failure(true)
                     .build(),
                 hooks: DenyNetwork,

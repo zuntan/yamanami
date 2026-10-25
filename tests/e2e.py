@@ -237,6 +237,12 @@ class EndToEnd(unittest.TestCase):
             ["--listen", "0.0.0.0:8080"],
             ["--concurrency", "0"],
             ["--timeout-ms", "0"],
+            ["--upload-limit", "0"],
+            ["--upload-limit", "134217729"],
+            ["--max-memories", "0"],
+            ["--max-instances", "513"],
+            ["--max-tables", "129"],
+            ["--compiler-opt-level", "invalid"],
         ]:
             result = subprocess.run([str(BINARY), "serve", *args], cwd=ROOT,
                                     env=env, capture_output=True, timeout=5)

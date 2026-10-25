@@ -1,0 +1,12 @@
+[package]
+name = "yamanami-demo-http"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["zuntan"]
+
+[dependencies]
+wasi = "0.14"
+minijinja = { version = "=2.24.0", default-features = false, features = ["builtins", "serde"] }
+serde = { version = "1", features = ["derive"] }
+form_urlencoded = "1"

@@ -6,6 +6,8 @@ WasmアプリケーションをHTTPで配備し、指定したパスから実行
 
 利用案内の机は[docs/yamanami_readme.tabletop](docs/yamanami_readme.tabletop)、開発記録は[docs_dev/](docs_dev/)、多言語デモの検討机は[exsample/docs/yamanami_exsample.tabletop](exsample/docs/yamanami_exsample.tabletop)に置きます。
 
+多言語電卓デモは[exsample/README.md](exsample/README.md)を参照してください。
+
 ## 初段でできること
 
 - CLI・HTTP管理APIによる配備、一覧、詳細取得、再配備による更新
@@ -119,18 +121,20 @@ target/debug/yamanami ctl --endpoint http://127.0.0.1:9091 list
 
 | 項目 | 既定値・動作 |
 | --- | --- |
-| ゲスト線形メモリ | 64 MiB、1メモリ。ホスト全体のRSS上限ではない |
+| ゲスト線形メモリ | 64 MiB / メモリ、既定1個。ホスト全体のRSS上限ではない |
 | fuel | 1リクエストあたり10,000,000 |
 | ゲスト実行期限 | 3秒。インスタンス生成・本文生成完了・ハンドラ終了を含む |
 | 全体 / アプリ同時実行数 | 16 / 4。空きがなければ503、待ち行列なし |
 | リクエスト / レスポンス本文 | 各1 MiB。初段はサイズ制限付きバッファ方式 |
-| Wasmアップロード | 16 MiB |
+| Wasmアップロード | 既定16 MiB。--upload-limitで最大128 MiBまで設定可能 |
 | 同時配備 | 1件。競合は503 |
 | アプリ数 | 最大32 |
 | コンパイルキャッシュ | 最近使用した8件と、現在有効・処理中のReleaseが保持するコード |
 | HTTP接続数 | 一般128、管理8。超過接続は閉じる |
 | HTTP接続期限 | 一般65秒、管理120秒。keep-aliveなし |
 | 本文受信期限 | 一般10秒、配備30秒 |
+
+--max-memories / --max-instances / --max-tablesでコンポーネント内部の資源個数の上限を指定できます。--compiler-opt-levelはspeed（既定）またはnoneです。コンパイルは別のブロッキング処理で、ランタイムの並列コンパイルを利用します。
 
 fuelは計算量の制限で、CPU使用率の指定ではありません。一定fuelごとの実行譲渡とepoch interruptionにより、CPUループがTokioを占有し続けることを防ぎます。実行失敗・ゲスト制限超過は502、一般本文の超過は413を返します。
 

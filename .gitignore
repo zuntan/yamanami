@@ -3,3 +3,10 @@
 /var/
 .env
 __pycache__/
+/exsample/**/target/
+/exsample/**/node_modules/
+/exsample/build/
+/exsample/python/.venv/
+/exsample/python/bindings/
+/exsample/.tools/
+/exsample/python/embedded_template.py

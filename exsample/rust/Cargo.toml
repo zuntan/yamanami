@@ -1,0 +1,16 @@
+[package]
+name = "calculator-rust"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["zuntan"]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+v2 = []
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+yamanami-demo-http = { path = "../http-support" }
+wasi = "0.14"
