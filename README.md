@@ -4,6 +4,8 @@ WasmアプリケーションをHTTPで配備し、指定したパスから実行
 
 **初段の実験実装です。** 実行ファイルは `yamanami` 一本で、サーバーと管理CLIを提供します。配備対象は標準WASI HTTPハンドラを公開する **WASI 0.2コンポーネント形式のWasm 1本**です。
 
+利用案内の机は[docs/yamanami_readme.tabletop](docs/yamanami_readme.tabletop)、開発記録は[docs_dev/](docs_dev/)、多言語デモの検討机は[exsample/docs/yamanami_exsample.tabletop](exsample/docs/yamanami_exsample.tabletop)に置きます。
+
 ## 初段でできること
 
 - CLI・HTTP管理APIによる配備、一覧、詳細取得、再配備による更新
@@ -174,9 +176,9 @@ E2Eテストはホストとサンプルのv1/v2をビルドし、一時ディレ
 
 サンプルの/sleep、/hold、/spin、/memory、/large、/networkは制限確認用のエンドポイントです。通常のアプリに組み込む機能ではありません。
 
-確認した結果と簡易性能測定は[初段の動作確認](docs/first-stage-verification.md)を参照してください。
+確認した結果と簡易性能測定は[初段の動作確認](docs_dev/first-stage-verification.md)を参照してください。
 
-GitHub Actions用の[CIテンプレート](docs/github-actions-ci.yml)も用意しています。現在のpush用トークンにはworkflow権限がないため、まだ有効化していません。対応する権限で.github/workflows/ci.ymlに配置すると有効になります。性能の本格評価は次の段階とし、リリースビルドで初回コンパイル、応答時間、スループット、p95、RSSを条件付きで測定します。
+GitHub Actions用の[CIテンプレート](docs_dev/github-actions-ci.yml)も用意しています。現在のpush用トークンにはworkflow権限がないため、まだ有効化していません。対応する権限で.github/workflows/ci.ymlに配置すると有効になります。性能の本格評価は次の段階とし、リリースビルドで初回コンパイル、応答時間、スループット、p95、RSSを条件付きで測定します。
 
 ## 設計と今後
 
@@ -193,7 +195,7 @@ HTTP境界には独自ABIを設けず、標準WASI HTTPを使用します。言�
 - HTTPS、外部公開、運用向けの制限・監視
 - Wasm内部のマルチスレッド、アプリ間通信、分散実行
 
-当初の調査・構想は[開発準備メモ](docs/initial-design.md)に保存しています。現在の実装範囲と操作方法はこのREADMEを参照してください。
+当初の調査・構想は[開発準備メモ](docs_dev/initial-design.md)に保存しています。現在の実装範囲と操作方法はこのREADMEを参照してください。
 
 ## ライセンス
 
