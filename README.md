@@ -4,6 +4,12 @@ WasmアプリケーションをHTTPで配備し、指定したHTTPパスから�
 
 **現在は開発準備・設計検討段階です。サーバー、CLI、サンプル、テストは未実装です。本書の構成は提案であり、確認を受けてから実装を開始します。**
 
+## 机で読む
+
+[Yamanamiの紹介・利用案内をTabletopで開く](https://zuntan.github.io/tabletop/?desk=https%3A%2F%2Fraw.githubusercontent.com%2Fzuntan%2Fyamanami%2Fmain%2Fdocs%2Fyamanami_readme.tabletop)
+
+机ファイルは[docs/yamanami_readme.tabletop](docs/yamanami_readme.tabletop)です。実験ブランチの利用案内をカードにまとめています。実装コードは[experiment/first-stage](https://github.com/zuntan/yamanami/tree/experiment/first-stage)で開発しています。
+
 ## 基本方針
 
 - サーバーの役割をHTTP受付、Wasm実行、OS資源へのアクセス、配備管理に絞る。
