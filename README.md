@@ -1,4 +1,4 @@
-# 小さなWasm専用HTTPアプリケーションサーバー
+# Yamanami — WebAssembly Application Server
 
 WasmアプリケーションをHTTPで配備し、指定したHTTPパスから実行する実験プロジェクトです。TomcatのWARデプロイやPHPのファイル配置に近い手軽さを、言語に依存しない実行境界で実現することを目指します。
 
