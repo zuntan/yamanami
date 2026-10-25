@@ -1,0 +1,30 @@
+name: yamanami
+services:
+  demo:
+    build:
+      context: .
+      target: demo
+    image: yamanami:demo-local
+    platform: linux/amd64
+    ports:
+      - "127.0.0.1:${YAMANAMI_HTTP_PORT:-8080}:8080"
+    volumes:
+      - yamanami-data:/var/lib/yamanami
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    cpus: 2
+    mem_limit: 4g
+    pids_limit: 256
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/yamanami-entrypoint", "health"]
+      interval: 5s
+      timeout: 5s
+      retries: 120
+      start_period: 20s
+volumes:
+  yamanami-data:

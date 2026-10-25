@@ -8,6 +8,8 @@ WasmアプリケーションをHTTPで配備し、指定したパスから実行
 
 多言語電卓デモは[exsample/README.md](exsample/README.md)を参照してください。
 
+**Dockerで試す・更新する手順は[DOCKER.md](DOCKER.md)にまとめています。** ホストへ各言語のツールチェーンを導入せず、clone後にComposeでデモをビルド・起動できます。
+
 ## 初段でできること
 
 - CLI・HTTP管理APIによる配備、一覧、詳細取得、再配備による更新
@@ -19,7 +21,7 @@ WasmアプリケーションをHTTPで配備し、指定したパスから実行
 - 再起動後の復元、無効な更新時の旧版維持
 - ゲストメモリ、fuel、実行期限、同時実行数、HTTP本文、アップロードの制限
 
-初段は一般HTTP・管理HTTPの両方をloopback限定とします。管理APIにはBearerトークンが必要です。外向きHTTP・ソケット・ホストのファイル・環境変数はゲストへ許可しません。標準WASIの時刻・乱数は利用できます。
+既定では一般HTTP・管理HTTPの両方をloopback限定とします。Docker用には--allow-non-loopback-httpでアプリHTTPだけの非loopback待受を明示できます。管理HTTPは常にloopback限定です。管理APIにはBearerトークンが必要です。外向きHTTP・ソケット・ホストのファイル・環境変数はゲストへ許可しません。標準WASIの時刻・乱数は利用できます。
 
 ## 開発環境の準備
 

@@ -32,6 +32,9 @@ const MAX_APPS: usize = 32;
 pub struct Options {
     #[arg(long, default_value = "127.0.0.1:8080")]
     listen: SocketAddr,
+    /// Allow non-loopback application HTTP (for container port publishing). Management remains loopback-only.
+    #[arg(long)]
+    allow_non_loopback_http: bool,
     #[arg(long, default_value = "127.0.0.1:9090")]
     admin_listen: SocketAddr,
     #[arg(long, default_value = "var/yamanami.sqlite3")]
@@ -143,15 +146,24 @@ fn matches(prefix: &str, path: &str) -> bool {
             .is_some_and(|s| s.starts_with('/'))
 }
 
-pub async fn serve(options: Options) -> Result<()> {
+fn validate_listeners(public: SocketAddr, admin: SocketAddr, allow_public: bool) -> Result<()> {
     ensure!(
-        options.listen.ip().is_loopback(),
-        "first-stage public listener must use a loopback address"
+        public.ip().is_loopback() || allow_public,
+        "non-loopback application HTTP requires --allow-non-loopback-http"
     );
     ensure!(
-        options.admin_listen.ip().is_loopback(),
+        admin.ip().is_loopback(),
         "management listener must use a loopback address"
     );
+    Ok(())
+}
+
+pub async fn serve(options: Options) -> Result<()> {
+    validate_listeners(
+        options.listen,
+        options.admin_listen,
+        options.allow_non_loopback_http,
+    )?;
     ensure!(
         options.listen != options.admin_listen,
         "HTTP and management listeners must differ"
@@ -509,6 +521,16 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn listener_boundaries() {
+        let local = "127.0.0.1:8080".parse().unwrap();
+        let public = "0.0.0.0:8080".parse().unwrap();
+        assert!(validate_listeners(local, local, false).is_ok());
+        assert!(validate_listeners(public, local, false).is_err());
+        assert!(validate_listeners(public, local, true).is_ok());
+        assert!(validate_listeners(local, public, true).is_err());
+        assert!(validate_listeners(public, public, true).is_err());
+    }
     #[test]
     fn route_boundaries_and_validation() {
         assert!(matches("/hello", "/hello"));

@@ -16,6 +16,7 @@ jobs:
       - run: cargo clippy --locked --manifest-path examples/hello/Cargo.toml --target wasm32-wasip2 --all-features -- -D warnings
       - run: cargo test --locked
       - run: python3 tests/e2e.py
+      - run: python3 tests/container-entrypoint.py
       - uses: actions/setup-node@v4
         with:
           node-version: "24"

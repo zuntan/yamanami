@@ -1,0 +1,13 @@
+.git
+target
+**/target
+**/node_modules
+**/__pycache__
+**/.venv
+exsample/.tools
+exsample/build
+exsample/python/bindings
+exsample/python/embedded_template.py
+var
+.env
+*.log

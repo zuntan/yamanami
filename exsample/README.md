@@ -14,6 +14,8 @@ indexもRust製WasmでHTMLを返します。4つの電卓はiframeに表示さ�
 
 すべてWASI HTTP 0.2.12のincoming-handlerを公開します。Rustのwasiクレートは0.14.7を入口に、ロックされたwasip2 1.0.4の0.2.12バインディングを使います。TypeScriptはJSへ変換・バンドルした後、JSエンジンと一緒にWasmへまとめます。実行ホストのNode.jsやPythonインストールには依存しません。
 
+**まずDockerで動かす場合は、ルートの[DOCKER.md](../DOCKER.md)を参照してください。以下はホストで個別に開発・ビルドする手順です。**
+
 ## 準備・ビルド
 
 現在のセットアップスクリプトは **Linux x86_64、Python 3.12以降、Node.js 24、npm、Rustup、C++コンパイラ**を前提とします。C++コンパイラはネイティブ単体テストにも使用します。新規環境でPythonのvenvが使用できない場合は、OSのvenvパッケージを先に用意してください。
